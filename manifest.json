@@ -1,0 +1,29 @@
+{
+    "name": "Threshold ECDSA for FIDO Authentication",
+    "version": "0.1",
+    "manifest_version": 3,
+    "description": "This Extension works as middleware to communicate between multiple FIDO authenticators in order to perform a valid Threshold ECDSA signature",
+    "permissions": ["webRequest"],
+    "host_permissions": ["<all_urls>"],
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["./scripts/contentScript.js"],
+            "run_at": "document_start" 
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "inject.js"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
+    "action": {
+        "default_title": "Title",
+        "default_popup": "popup.html"
+    }
+}
