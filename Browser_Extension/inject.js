@@ -2,17 +2,18 @@
     Override original credentials.create
     - TODO: change if-condition
 */
+
 var currentScript = document.currentScript;
 var orig_create = navigator.credentials.create;
 navigator.credentials.create = function() {
-    const cred = currentScript.getAttribute('data-cred');
+    const cred = currentScript.getAttribute('cred');
     if (cred !== null) {
-        console.log(JSON.stringify(cred));
+        console.log("PLACEHOLDER - HERE COMES NEW CREATION");
     }
     var result = orig_create.apply(navigator.credentials, arguments);
-    // Page context
     result.then(function(credential) {
-        // Extracting properties from the PublicKeyCredential object
+        // TODO: STORING MIGHT NOT BE NECESSARY
+        console.log(credential);
         var jsonData = {
             id: credential.id,
             rawId: bufferToBase64url(credential.rawId),
@@ -26,7 +27,6 @@ navigator.credentials.create = function() {
         window.dispatchEvent(event);
     })
     .catch(function(error) {
-        // Promise rejected or an error occurred
         console.error("Error caught:", error);
     });
     return result;
@@ -35,19 +35,6 @@ navigator.credentials.create = function() {
 var orig_get = navigator.credentials.get;
 navigator.credentials.get = function() {
     var result = orig_get.apply(navigator.credentials, arguments);
-    /*result.then(function(credential) {
-        // If authentication is successful
-        if (credential !== null) {
-            // Do something with the authenticated credential
-            console.log("Authentication successful:", credential);
-        } else {
-            // Authentication failed or no matching credential found
-            console.log("Authentication failed or no matching credential found.");
-        }
-    }).catch(function(error) {
-        // Handle errors
-        console.error("Error during authentication:", error);
-    });*/
     return result;
 }
 
@@ -75,3 +62,19 @@ function bufferToBase64url (buffer) {
     ).replace(/=/g, "");
     return base64urlString;
 }
+
+
+// Function to decode base64url and return a Uint8Array
+function decodeBase64Url(base64Url) {
+    // Replace '-' with '+' and '_' with '/' and add padding if necessary
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/').padEnd((base64Url.length + 3) & ~3, '=');
+    // Decode the base64 string
+    const binaryString = atob(base64);
+    // Create a Uint8Array from the binary string
+    const arrayBuffer = new ArrayBuffer(binaryString.length);
+    const uint8Array = new Uint8Array(arrayBuffer);
+    for (let i = 0; i < binaryString.length; i++) {
+      uint8Array[i] = binaryString.charCodeAt(i);
+    }
+    return uint8Array;
+  }
