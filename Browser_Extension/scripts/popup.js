@@ -13,22 +13,16 @@ if (savedOption === 'true') {
 
 function changeToggle() {
    const option = optionToggle.checked;
-    saveOptionState(option);
+   saveOptionState(option);
 }
 
 function saveOptionState(option) {
   localStorage.setItem('option', option ? 'true' : 'false');
+  chrome.storage.local.set({'toggle': localStorage.getItem('option')}, function() {});
 }
 
+
 optionToggle.addEventListener('change', changeToggle);
-
-var dataToStore = {
-  key: "value"
-};
-
-chrome.storage.sync.set(dataToStore, function() {
-  console.log('Data saved to storage');
-});
 
 /*
   logic to reset a saved credential
