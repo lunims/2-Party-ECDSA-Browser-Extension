@@ -1,8 +1,8 @@
-# 2-Party-ECDSA-Browser-Extension
+# Protecting FIDO Credentials using Multi- and Threshold Signatures 
 
 **Overview**
 
-This repo contains the code of my Bachelor Thesis, in which a multi-party ECDSA signature scheme is implementend on FIDO authenticators.
+This repo contains the code of my Bachelor Thesis, in which a multi-party ECDSA signature scheme is implementend on FIDO authenticators. 
 
 **Important Note**
 

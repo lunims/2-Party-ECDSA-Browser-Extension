@@ -1,4 +1,4 @@
-# 2-Party-ECDSA-Browser-Extension
+# Multi-Party-ECDSA-Browser-Extension
 
 **Overview**
 
