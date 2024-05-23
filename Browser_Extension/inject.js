@@ -9,16 +9,32 @@ navigator.credentials.create = function() {
     var number1 = parseInt(currentScript.getAttribute('t'));
     var number2 = parseInt(currentScript.getAttribute('n'));
     /*
-        TODO: generate RSA Key-Pair
+        Generating RSA Key Pair, which will then be split by Shamirs Secret Sharing
     */
-    /*
+    window.crypto.subtle.generateKey(
+        {
+            name: "RSA-OAEP",
+            modulusLength: 2048,
+            publicExponent: new Uint8Array([0x01, 0x00, 0x01]),
+            hash: {name: "SHA-256"}
+        },
+        true, // Whether the key is extractable
+        ["encrypt", "decrypt"] // Key usage
+    ).then(function(keyPair) {
+        keys = keyPair;
+        console.log("RSA key pair generated:", keyPair);
+        /*
         Trusted Dealer:
         - TODO: use Shamirs secret Sharing
         - deal each key to party
-    */
-    console.log(arguments[0]['publicKey']['challenge']);
+        */
+    }).catch(function(err) {
+        console.error("Error generating RSA key pair:", err);
+    });
+    //console.log(arguments[0]['publicKey']['challenge']);
     return orig_create.apply(navigator.credentials, arguments);
-} 
+}
+ 
 
 var orig_get = navigator.credentials.get;
 navigator.credentials.get = function() {
