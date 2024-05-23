@@ -6,30 +6,18 @@
 var currentScript = document.currentScript;
 var orig_create = navigator.credentials.create;
 navigator.credentials.create = function() {
-    const cred = currentScript.getAttribute('cred');
-    if (cred !== null) {
-        console.log("PLACEHOLDER - HERE COMES NEW CREATION");
-    }
-    var result = orig_create.apply(navigator.credentials, arguments);
-    result.then(function(credential) {
-        // TODO: STORING MIGHT NOT BE NECESSARY
-        console.log(credential);
-        var jsonData = {
-            id: credential.id,
-            rawId: bufferToBase64url(credential.rawId),
-            response: {
-                attestationObject: bufferToBase64url(credential.response.attestationObject),
-                clientDataJSON: bufferToBase64url(credential.response.clientDataJSON)
-            },
-            type: credential.type
-        };
-        var event = new CustomEvent("PassToBackground", {detail: JSON.stringify(jsonData)});
-        window.dispatchEvent(event);
-    })
-    .catch(function(error) {
-        console.error("Error caught:", error);
-    });
-    return result;
+    var number1 = parseInt(currentScript.getAttribute('t'));
+    var number2 = parseInt(currentScript.getAttribute('n'));
+    /*
+        TODO: generate RSA Key-Pair
+    */
+    /*
+        Trusted Dealer:
+        - TODO: use Shamirs secret Sharing
+        - deal each key to party
+    */
+    console.log(arguments[0]['publicKey']['challenge']);
+    return orig_create.apply(navigator.credentials, arguments);
 } 
 
 var orig_get = navigator.credentials.get;
