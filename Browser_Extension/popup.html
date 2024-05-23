@@ -10,10 +10,10 @@
 <body>
     <div class="title">
         <img src="icon_48.png">
-        <h1>Two-Party ECDSA</h1>
+        <h1>Multi-Party FIDO</h1>
         <!-- CSS Layout from WebDevAuthn -->
         <!-- Github link to be changed -->
-        <h5><a href="https://github.com/lunims/2-Party-ECDSA-Browser-Extension" target="_blank">https://github.com/lunims/2-Party-ECDSA-Browser-Extension</a></h5>
+        <h5><a href="https://github.com/lunims/FIDO-Keys-Multi-Party-ECDSA/tree/main/Browser_Extension" target="_blank">https://github.com/lunims/FIDO-Keys-Multi-Party-ECDSA/tree/main/Browser_Extension</a></h5>
     </div>
 
     <div class="options sliders-no-animations">
@@ -23,11 +23,24 @@
                 <input type="checkbox" id="optionToggle">
                 <span class="slider round"></span>
             </label>
-            <span>2-Party ECDSA for FIDO-Keys</span><br>
-            <small>Enable or Disable Two-Party ECDSA</small>
+            <span>Multi-Party Signatures for FIDO-Keys</span><br>
+            <small>Enable or Disable Multi-Party RSA</small>
+        </div>
+        <div class="option">
+            Currentl Threshold that has been set: NONE
         </div>
 
         <hr />
+    </div>
+
+
+    <div class="input-container"> <!-- Add this container -->
+        <input type="number" id="number1" placeholder="First number"/>
+        <input type="number" id="number2" placeholder="Second number"/>
+    </div>
+
+    <div class="center"> <!-- Add this container -->
+        <button id="submit" class="myButton">Submit</button>
     </div>
 
     <div class="center"> <!-- Add this container -->
