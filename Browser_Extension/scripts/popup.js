@@ -45,6 +45,9 @@ submitButton.addEventListener('click', function() {
     const numbers = `t: ${number1}, n: ${number2}`;
     alert(`You entered: ${numbers}`);
 
+    const savedNumbers = document.getElementById('savedNumbers');
+    savedNumbers.innerHTML = `t: ${number1} out of n: ${number2}`;
+
     chrome.storage.local.set({'number1': number1.toString()}, function() {});
     chrome.storage.local.set({'number2': number2.toString() });
   } else {
@@ -57,10 +60,12 @@ submitButton.addEventListener('click', function() {
 */
 
 function reset() {
-  chrome.storage.local.remove('credential', function() {
+  chrome.storage.local.remove(['number1', 'number2'], function() {
     if (chrome.runtime.lastError) {
       console.error('Error removing credential:', chrome.runtime.lastError);
     } else {
+      const savedNumbers = document.getElementById('savedNumbers');
+      savedNumbers.innerHTML = `t: NONE out of n: NONE`;
       console.log('Credential removed from local storage.');
     }
   });
