@@ -1,0 +1,11 @@
+# pack-refs with: peeled fully-peeled sorted 
+8916b2ba419b57fe2af1297ddcffdf9ac0cd7516 refs/heads/allowlist-rk
+02620449c31cec1d3c99c5509de96892d1e80438 refs/heads/fix-apdu-over-apdu
+b039682d5c7ab9a17511d1b73dadc8f2e3c96f35 refs/heads/less-ram
+59ca62a290bd6c012af0119e86797d666a0155d7 refs/heads/main
+1d26e9f165bb1a91149768cf1d72b8deeb0a6272 refs/heads/signal-credprotect
+810a103747738625bd2417f61b3267958c2c3fa6 refs/heads/stripped-credentials
+e6bfb5f70b5857339e056c8c9e089fd358e7034e refs/tags/0.1.0
+^e399a110b1a79a686ccfd7ed7866c902bc7b9b9d
+484262dd4e0735252e022c8f2d95f1022bac2724 refs/tags/0.1.1
+^d3e17537eb854d2c72e42968ef62e61cd2d6e0da
