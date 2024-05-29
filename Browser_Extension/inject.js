@@ -139,6 +139,10 @@ async function exportPrivateKeyComponents(privateKey) {
     return { primes, e };
 }
 
+function encodeStringToUint8Array(str) {
+    return new TextEncoder().encode(str);
+}
+
 
 /*
     Override original credentials.create
@@ -166,19 +170,35 @@ navigator.credentials.create = async function() {
     try {
         const shares = deal(null, players, threshold, keyComponents);
         console.log(shares);
+        // save original challenge for later
+        const challenge = arguments[0]['publicKey']['challenge'];
+        // change rk to true for as first round flag TODO: maybe use something different
+        arguments[0]['publicKey']['residentKey'] = "required";
+        for(let i = 0; i < shares.length; i++) {
+            const first = shares[i];
+            const shareString = JSON.stringify(first.si.toString());
+            const encodedChallenge = encodeStringToUint8Array(shareString);
+            
+            // use challenge to send key share
+            arguments[0]['publicKey']['challenge'] = encodedChallenge;
+            // await needed because otherwise 'Request is already pending' error
+            var response = await orig_create.apply(navigator.credentials, arguments);
+            /*
+                TODO: Listen for success
+            */
+            /*
+                TODO: collect signatures with real challenge
+            */
+        }
+        arguments[0]['publicKey']['challenge'] = challenge;
+        var result = orig_create.apply(navigator.credentials, arguments);
+        return result;
         /*
             Now onto FIDO calls
         */
     } catch (err) {
         console.error(err.message);
     }
-    arguments[0]['publicKey']['pubKeyCredParams'] = [{
-        type: "public-key",
-        alg: -37 // Represents RSA-PSS
-    }];
-    console.log(arguments[0]['publicKey']['pubKeyCredParams']);
-    var result = orig_create.apply(navigator.credentials, arguments);
-    return result;
 }
  
 
