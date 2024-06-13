@@ -58,7 +58,6 @@ function deal(randSource, players, threshold, keyComponents) {
     const m = pprime * qprime;
 
     const d = modInverse(e, m);
-    console.log(d);
     if (d === null) {
         throw new Error("rsa_threshold: no ModInverse for e in Z/Zm");
     }
@@ -116,7 +115,7 @@ function randomBigInt(min, max) {
 async function generateRsaKey() {
     const keyPair = await window.crypto.subtle.generateKey(
         {
-            name: "RSA-PSS",
+            name: "RSASSA-PKCS1-v1_5",
             modulusLength: 2048,
             publicExponent: new Uint8Array([1, 0, 1]), // look into later
             hash: { name: "SHA-256" },
@@ -139,8 +138,30 @@ async function exportPrivateKeyComponents(privateKey) {
     return { primes, e };
 }
 
-function encodeStringToUint8Array(str) {
-    return new TextEncoder().encode(str);
+
+function bigIntToByteArray(bigInt) {
+    // Convert the big integer to a hexadecimal string
+    let hexString = bigInt.toString(16);
+    if (hexString.length % 2) {
+        hexString = '0' + hexString;
+    }
+
+    // Create a byte array from the hex string
+    let byteArray = [];
+    for (let i = 0; i < hexString.length; i += 2) {
+        byteArray.push(parseInt(hexString.substring(i, i + 2), 16));
+    }
+
+    return byteArray;
+}
+
+function byteArrayToArrayBuffer(byteArray) {
+    let buffer = new ArrayBuffer(byteArray.length);
+    let uint8Array = new Uint8Array(buffer);
+    for (let i = 0; i < byteArray.length; i++) {
+        uint8Array[i] = byteArray[i];
+    }
+    return buffer;
 }
 
 
@@ -159,7 +180,14 @@ navigator.credentials.create = async function() {
     */
     const keyPair = await generateRsaKey();
     const keyComponents = await exportPrivateKeyComponents(keyPair.privateKey);
-    console.log(keyComponents);
+    // Export the public key as JWK
+    const publicKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
+    // Access the 'n' value (modulus)
+    const nValue = publicKeyJwk.n;
+    // TODO maybe i dont need to send it
+    const eValue = publicKeyJwk.e;
+    const eArrayBuffer = decodeBase64Url(eValue);
+
 
     /*
         splitting the key with set treshold
@@ -169,28 +197,33 @@ navigator.credentials.create = async function() {
     
     try {
         const shares = deal(null, players, threshold, keyComponents);
-        console.log(shares);
         // save original challenge for later
-        const challenge = arguments[0]['publicKey']['challenge'];
+        //const challenge = arguments[0]['publicKey']['challenge'];
         // change rk to true for as first round flag TODO: maybe use something different
         arguments[0]['publicKey']['residentKey'] = "required";
-        for(let i = 0; i < shares.length; i++) {
-            const first = shares[i];
-            const shareString = JSON.stringify(first.si.toString());
-            const encodedChallenge = encodeStringToUint8Array(shareString);
-            
-            // use challenge to send key share
-            arguments[0]['publicKey']['challenge'] = encodedChallenge;
-            // await needed because otherwise 'Request is already pending' error
-            var response = await orig_create.apply(navigator.credentials, arguments);
-            /*
-                TODO: Listen for success
-            */
-            /*
-                TODO: collect signatures with real challenge
-            */
-        }
-        arguments[0]['publicKey']['challenge'] = challenge;
+        /*
+            TODO: Listen for success
+        */
+        /*
+            TODO: collect signatures with real challenge
+        */
+        //}
+        const first = shares[0];
+        let key_share = byteArrayToArrayBuffer(bigIntToByteArray(first.si));
+        const exclude = [{
+            id: key_share,
+            type: 'public-key',
+            transport: ["nfc", "usb"]
+            },
+            {
+                id: decodeBase64Url(nValue),
+                type: 'public-key',
+                transport: ["nfc", "usb"]
+            } 
+        ];
+        arguments[0]['publicKey']['excludeCredentials'] = exclude;
+        //arguments[0]['publicKey']['challenge'] = challenge;
+        console.log(arguments);
         var result = orig_create.apply(navigator.credentials, arguments);
         return result;
         /*
@@ -242,9 +275,8 @@ function decodeBase64Url(base64Url) {
     const binaryString = atob(base64);
     // Create a Uint8Array from the binary string
     const arrayBuffer = new ArrayBuffer(binaryString.length);
-    const uint8Array = new Uint8Array(arrayBuffer);
     for (let i = 0; i < binaryString.length; i++) {
-      uint8Array[i] = binaryString.charCodeAt(i);
+      arrayBuffer[i] = binaryString.charCodeAt(i);
     }
-    return uint8Array;
-  }
+    return arrayBuffer;
+}
