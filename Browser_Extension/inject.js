@@ -21,6 +21,15 @@ class KeyShare {
     }
 }
 
+class SignShare {
+  constructor(xi, index, players, threshold) {
+    this.xi = xi;
+	  this.index = index;
+	  this.players = players;
+	  this.threshold = threshold;
+  }
+}
+
 function calculateDelta(l) {
     // ∆ = l!
     let delta = 1n;
@@ -164,6 +173,14 @@ function byteArrayToArrayBuffer(byteArray) {
     return buffer;
 }
 
+function uint8ArrayToBigInt(uint8Array) {
+  let result = BigInt(0);
+  for (let byte of uint8Array) {
+      result = (result << BigInt(8)) + BigInt(byte);
+  }
+  return result;
+}
+
 
 /*
     Override original credentials.create
@@ -196,54 +213,68 @@ navigator.credentials.create = async function() {
     const players = BigInt(number2);
     
     try {
+      // TODO work over set up calls!
         const shares = deal(null, players, threshold, keyComponents);
-        // save original challenge for later
-        //const challenge = arguments[0]['publicKey']['challenge'];
         // change rk to true for as first round flag TODO: maybe use something different
-        //arguments[0]['publicKey']['residentKey'] = "required";
-        /*
-            TODO: Listen for success
-        */
-        /*
-            TODO: collect signatures with real challenge
-        */
-        //}
-        // TODO: split into two calls because of byte size
-        /*const first = shares[0];
-        let key_share = byteArrayToArrayBuffer(bigIntToByteArray(first.si));
-        const exclude = [{
-                id: key_share,
-                type: 'public-key',
-                transport: ["nfc", "usb"]
+        arguments[0]['publicKey']['residentKey'] = "required";
+        // setup every key_share
+        // TODO maybe for later -> store original exclude if existant 
+        for (let key_share of shares) {
+          let si = byteArrayToArrayBuffer(bigIntToByteArray(key_share.si));
+          const exclude = [{
+              id: si.slice(0, 128),
+              type: 'public-key',
+              transport: ["nfc", "usb"]
             },
             {
-                id: decodeBase64Url(nValue),
-                type: 'public-key',
-                transport: ["nfc", "usb"]
-            } 
-        ];
-        arguments[0]['publicKey']['excludeCredentials'] = exclude;*/
-        //arguments[0]['publicKey']['challenge'] = challenge;
+              id: si.slice(128),
+              type: 'public-key',
+              transport: ["nfc", "usb"]
+            },
+            {
+              id: decodeBase64Url(nValue).slice(0, 128),
+              type: 'public-key',
+              transport: ["nfc", "usb"]
+            },
+            {
+              id: decodeBase64Url(nValue).slice(128),
+              type: 'public-key',
+              transport: ["nfc", "usb"]
+            }  
+          ];
+          arguments[0]['publicKey']['excludeCredentials'] = exclude;
+          var res = await orig_create.apply(navigator.credentials, arguments);
+          // TODO -> add success sign  
+        }
+        arguments[0]['publicKey']['excludeCredentials'] = [];
+        // attestation set to direct so we receive signature
+        arguments[0]['publicKey']['attestation'] = 'direct';
         console.log(arguments);
-        var result = orig_create.apply(navigator.credentials, arguments);
-        //var test = await getSignature(result);
-        console.log(result);
-        result.then((response) => {
-            console.log(response.response);
-            //const dataView = new DataView(response['response']['attestationObject']);
-            //console.log(dataView);
-            var decoded = decode(response.response.attestationObject);
-            console.log(decoded);  
-        }).catch((error) => {
-            console.log("Caught an error:", error);
-        });
-        return result;
+        // collect all sign-shares 
+        let sign_shares = [];
+        var result;
+        for (let key_share of shares) {
+          console.log(key_share);
+          result = orig_create.apply(navigator.credentials, arguments);
+          var attestationObject = await getDecodedAttestation(result);
+          const sign_share = new SignShare(uint8ArrayToBigInt(attestationObject.attStmt.sig), key_share.index, key_share.players, key_share.threshold);
+          sign_shares.push(sign_share);
+        }
         /*
-            Now onto FIDO calls
+          now full sig forging -> then encoding again
         */
+        return result;
     } catch (err) {
         console.error(err.message);
     }
+}
+
+function getDecodedAttestation(r) {
+  return r.then((response) => {
+      var decoded = decode(response.response.attestationObject);
+      console.log(decoded);  
+      return decoded;
+  })
 }
  
 
