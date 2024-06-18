@@ -147,6 +147,161 @@ async function exportPrivateKeyComponents(privateKey) {
     return { primes, e };
 }
 
+function combineSignShares(pub, shares, msg) {
+    const players = shares[0].Players;
+    const threshold = shares[0].Threshold;
+
+    for (let i = 0; i < shares.length; i++) {
+        if (shares[i].Players !== players) {
+            throw new Error("rsa_threshold: shares didn't have consistent players");
+        }
+        if (shares[i].Threshold !== threshold) {
+            throw new Error("rsa_threshold: shares didn't have consistent threshold");
+        }
+    }
+
+    if (shares.length < threshold) {
+        throw new Error("rsa_threshold: insufficient shares for the threshold");
+    }
+
+    let w = BigInt(1);
+    const delta = calculateDelta(players);
+
+    for (let i = 0; i < shares.length; i++) {
+        const share = shares[i];
+        const lambda = computeLambda(delta, shares, 0, share.Index);
+
+        const exp = lambda * 2n;
+
+        let tmp = modPow(share.xi, exp, pub.N);
+        if (exp > 0) {
+            tmp = modInverse(tmp, pub.N);
+        }
+
+        w = w * tmp % pub.N;
+    }
+
+    const eprime = delta * delta * 4n;
+
+    let a, b;
+    let e = BigInt(pub.E);
+    let tmp = extendedGCD(eprime, e);
+    a = tmp[0];
+
+    const wa = modPow(w, a, pub.N);
+    const x = BigInt(`0x${Buffer.from(msg).toString('hex')}`);
+    const xb = modPow(x, b, pub.N);
+    const y = wa * xb % pub.N;
+
+    const ye = modPow(y, e, pub.N);
+    if (ye !== x) {
+        throw new Error("rsa: internal error");
+    }
+
+    const sig = Buffer.from(y.toString(16), 'hex');
+
+    return sig;
+}
+
+function computeLambda(delta, S, i, j) {
+    if (i === j) {
+        throw new Error("rsa_threshold: i and j can't be equal by precondition");
+    }
+
+    let foundi = false;
+    let foundj = false;
+
+    let num = 1n;
+    let den = 1n;
+
+    for (let k = 0; k < S.length; k++) {
+        const s = S[k];
+        const jprime = BigInt(s.Index);
+
+        if (jprime === j) {
+            foundj = true;
+            continue;
+        }
+        if (jprime === i) {
+            foundi = true;
+            break;
+        }
+
+        num *= i - jprime;
+        den *= j - jprime;
+    }
+
+    const lambda = delta * num / den;
+
+    if (foundi) {
+        throw new Error(`rsa_threshold: i: ${i} should not be in S`);
+    }
+
+    if (!foundj) {
+        throw new Error(`rsa_threshold: j: ${j} should be in S`);
+    }
+
+    return lambda;
+}
+
+  // Helper functions
+
+function modPow(base, exp, mod) {
+    if (exp === 0n) return 1n;
+    let result = 1n;
+    let power = base % mod;
+    while (exp > 0n) {
+        if (exp % 2n === 1n) {
+            result = (result * power) % mod;
+        }
+        power = (power * power) % mod;
+        exp = exp / 2n;
+    }
+    return result;
+}
+
+function modInverse(a, m) {
+    const m0 = m;
+    let t, q;
+    let x0 = 0n;
+    let x1 = 1n;
+
+    if (m === 1n) return 0n;
+
+    while (a > 1n) {
+        q = a / m;
+        t = m;
+        m = a % m;
+        a = t;
+        t = x0;
+        x0 = x1 - q * x0;
+        x1 = t;
+    }
+
+    if (x1 < 0n) {
+        x1 += m0;
+    }
+
+    return x1;
+}
+
+function extendedGCD(a, b) {
+    let x = 0n, y = 1n, u = 1n, v = 0n;
+    while (a !== 0n) {
+        let q = b / a;
+        let r = b % a;
+        let m = x - u * q;
+        let n = y - v * q;
+        b = a;
+        a = r;
+        x = u;
+        y = v;
+        u = m;
+        v = n;
+    }
+    return [x, y, b];
+}
+
 
 function bigIntToByteArray(bigInt) {
     // Convert the big integer to a hexadecimal string
@@ -184,7 +339,7 @@ function uint8ArrayToBigInt(uint8Array) {
 
 /*
     Override original credentials.create
-    - TODO: configure FIDO challenges
+    - TODO: need to change alf identifier so sha-256 is used
 */
 
 var currentScript = document.currentScript;
@@ -204,7 +359,9 @@ navigator.credentials.create = async function() {
     // TODO maybe i dont need to send it
     const eValue = publicKeyJwk.e;
     const eArrayBuffer = decodeBase64Url(eValue);
-
+    const e = decodeBase64Url(eValue);
+    const n = decodeBase64Url(nValue);
+    const pub = {N: new Uint8Array(e), E: new Uint8Array(n)};
 
     /*
         splitting the key with set treshold
@@ -260,6 +417,8 @@ navigator.credentials.create = async function() {
           const sign_share = new SignShare(uint8ArrayToBigInt(attestationObject.attStmt.sig), key_share.index, key_share.players, key_share.threshold);
           sign_shares.push(sign_share);
         }
+        // TODO -> hash and pad original message in order to be able to combine signatures
+        //var sig = combineSignShares(pub, )
         /*
           now full sig forging -> then encoding again
         */
