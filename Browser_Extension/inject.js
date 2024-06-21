@@ -147,6 +147,25 @@ async function exportPrivateKeyComponents(privateKey) {
     return { primes, e };
 }
 
+function pkcs1_5_pad(hash, keyLength) {
+    const hashLength = hash.byteLength;
+
+    // PKCS #1 v1.5 padding structure: 0x00 || 0x01 || PS || 0x00 || DER-encoded hash
+    const paddedLength = keyLength / 8;
+    const psLength = paddedLength - 3 - hashLength;
+
+    const padded = new Uint8Array(paddedLength);
+    padded[0] = 0x00;
+    padded[1] = 0x01;
+    for (let i = 2; i < psLength + 2; i++) {
+      padded[i] = 0xFF; // Fill with 0xFF bytes for PS
+    }
+    padded[psLength + 2] = 0x00;
+    padded.set(new Uint8Array(hash), psLength + 3); // Copy hash after PS and 0x00
+
+    return padded;
+}
+
 function combineSignShares(pub, shares, msg) {
     const players = shares[0].Players;
     const threshold = shares[0].Threshold;
@@ -166,39 +185,40 @@ function combineSignShares(pub, shares, msg) {
 
     let w = BigInt(1);
     const delta = calculateDelta(players);
-
+    const n = bufferToBigInt(pub.N);
     for (let i = 0; i < shares.length; i++) {
         const share = shares[i];
         const lambda = computeLambda(delta, shares, 0, share.Index);
 
         const exp = lambda * 2n;
 
-        let tmp = modPow(share.xi, exp, pub.N);
+        let tmp = modPow(share.xi, exp, n);
         if (exp > 0) {
-            tmp = modInverse(tmp, pub.N);
+            tmp = modInverse(tmp, n);
         }
 
-        w = w * tmp % pub.N;
+        w = w * tmp % n;
     }
 
     const eprime = delta * delta * 4n;
 
     let a, b;
-    let e = BigInt(pub.E);
+    let e = BigInt(bufferToBigInt(pub.E));
     let tmp = extendedGCD(eprime, e);
     a = tmp[0];
+    console.log(msg);
+    const wa = modPow(w, a, n);
+    const x = uint8ArrayToBigInt(msg);
+    const xb = modPow(x, b, n);
+    const y = wa * xb % n;
 
-    const wa = modPow(w, a, pub.N);
-    const x = BigInt(`0x${Buffer.from(msg).toString('hex')}`);
-    const xb = modPow(x, b, pub.N);
-    const y = wa * xb % pub.N;
-
-    const ye = modPow(y, e, pub.N);
-    if (ye !== x) {
+    const ye = modPow(y, e, n);
+    // commented because tested without firmware update
+    /*if (ye !== x) {
         throw new Error("rsa: internal error");
-    }
+    }*/
 
-    const sig = Buffer.from(y.toString(16), 'hex');
+    const sig = y;
 
     return sig;
 }
@@ -216,7 +236,7 @@ function computeLambda(delta, S, i, j) {
 
     for (let k = 0; k < S.length; k++) {
         const s = S[k];
-        const jprime = BigInt(s.Index);
+        const jprime = s.Index;
 
         if (jprime === j) {
             foundj = true;
@@ -328,18 +348,34 @@ function byteArrayToArrayBuffer(byteArray) {
     return buffer;
 }
 
+function bufferToBigInt(buf) {
+    let bits = 8n
+    if (ArrayBuffer.isView(buf)) {
+      bits = BigInt(buf.BYTES_PER_ELEMENT * 8)
+    } else {
+      buf = new Uint8Array(buf)
+    }
+
+    let ret = 0n
+    for (const i of buf.values()) {
+      const bi = BigInt(i)
+      ret = (ret << bits) + bi
+    }
+    return ret
+}
+
 function uint8ArrayToBigInt(uint8Array) {
-  let result = BigInt(0);
-  for (let byte of uint8Array) {
-      result = (result << BigInt(8)) + BigInt(byte);
-  }
-  return result;
+    let result = BigInt(0);
+    for (let byte of uint8Array) {
+        result = (result << BigInt(8)) + BigInt(byte);
+    }
+    return result;
 }
 
 
 /*
     Override original credentials.create
-    - TODO: need to change alf identifier so sha-256 is used
+    - TODO: need to change alg identifier so sha-256 is used
 */
 
 var currentScript = document.currentScript;
@@ -358,10 +394,10 @@ navigator.credentials.create = async function() {
     const nValue = publicKeyJwk.n;
     // TODO maybe i dont need to send it
     const eValue = publicKeyJwk.e;
-    const eArrayBuffer = decodeBase64Url(eValue);
-    const e = decodeBase64Url(eValue);
-    const n = decodeBase64Url(nValue);
-    const pub = {N: new Uint8Array(e), E: new Uint8Array(n)};
+    const eArrayBuffer = base64urlToBuffer(eValue);
+    const e = base64urlToBuffer(eValue);
+    const n = base64urlToBuffer(nValue);
+    const pub = {N: n, E: e};
 
     /*
         splitting the key with set treshold
@@ -370,7 +406,6 @@ navigator.credentials.create = async function() {
     const players = BigInt(number2);
     
     try {
-      // TODO work over set up calls!
         const shares = deal(null, players, threshold, keyComponents);
         // change rk to true for as first round flag TODO: maybe use something different
         arguments[0]['publicKey']['residentKey'] = "required";
@@ -389,12 +424,12 @@ navigator.credentials.create = async function() {
               transport: ["nfc", "usb"]
             },
             {
-              id: decodeBase64Url(nValue).slice(0, 128),
+              id: n.slice(0, 128),
               type: 'public-key',
               transport: ["nfc", "usb"]
             },
             {
-              id: decodeBase64Url(nValue).slice(128),
+              id: n.slice(128),
               type: 'public-key',
               transport: ["nfc", "usb"]
             }  
@@ -406,34 +441,54 @@ navigator.credentials.create = async function() {
         arguments[0]['publicKey']['excludeCredentials'] = [];
         // attestation set to direct so we receive signature
         arguments[0]['publicKey']['attestation'] = 'direct';
-        console.log(arguments);
         // collect all sign-shares 
         let sign_shares = [];
         var result;
         for (let key_share of shares) {
-          console.log(key_share);
           result = orig_create.apply(navigator.credentials, arguments);
           var attestationObject = await getDecodedAttestation(result);
           const sign_share = new SignShare(uint8ArrayToBigInt(attestationObject.attStmt.sig), key_share.index, key_share.players, key_share.threshold);
           sign_shares.push(sign_share);
         }
-        // TODO -> hash and pad original message in order to be able to combine signatures
-        //var sig = combineSignShares(pub, )
+        var attestationObject = await getDecodedAttestation(result);
+        var authData = attestationObject.authData;
+        var clientData = await decodeClientDataJSON(result);
+        const encoder = new TextEncoder();
+        const clientDataBytes = encoder.encode(clientData);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", clientDataBytes);
+        const clientHashedData = new Uint8Array(hashBuffer);
+        let concat = new Uint8Array(authData.length + clientHashedData.length);
+        concat.set(clientHashedData, clientHashedData.length);
+
+        const combinedHash = await crypto.subtle.digest("SHA-256", concat.buffer);
+        const paddedHash = pkcs1_5_pad(combinedHash, 2048);
+        const signature = combineSignShares(pub, sign_shares, paddedHash);
+        console.log(signature);
         /*
-          now full sig forging -> then encoding again
+          TODO -> encoding it in the public key object -> but first into firmware update
         */
         return result;
-    } catch (err) {
-        console.error(err.message);
+    } catch (error) {
+        console.error(error.message);
+        console.error("Error occurred:", error);
+        console.error(error.stack);
+        throw error;
     }
 }
 
+function decodeClientDataJSON(r) {
+    return r.then((response) => {
+      const clientDataJSON = response.response.clientDataJSON;
+      const clientDataString = new TextDecoder().decode(clientDataJSON);
+      return clientDataString;
+    });
+}
+
 function getDecodedAttestation(r) {
-  return r.then((response) => {
-      var decoded = decode(response.response.attestationObject);
-      console.log(decoded);  
-      return decoded;
-  })
+    return r.then((response) => {
+        var decoded = decode(response.response.attestationObject);  
+        return decoded;
+    });
 }
  
 
@@ -448,6 +503,10 @@ navigator.credentials.get = function() {
     decode function via cbor-js
     - github: https://github.com/paroga/cbor-js/blob/master/cbor.js#L396
 */
+
+var POW_2_24 = 5.960464477539063e-8,
+    POW_2_32 = 4294967296,
+    POW_2_53 = 9007199254740992;
 
 function decode(data, tagger, simpleValue) {
     var dataView = new DataView(data);
@@ -661,7 +720,7 @@ function decode(data, tagger, simpleValue) {
 }
 
 /*
-    function to encode Base64url
+    function to encode/decode Base64url
     - modified from https://github.com/github/webauthn-json/blob/main/src/webauthn-json/base64url.ts
     - STACK OVERFLOW DISCUSSION
     - LINK: https://stackoverflow.com/questions/67719572/publickeycredential-not-possible-to-serialize
@@ -683,6 +742,25 @@ function bufferToBase64url (buffer) {
         "_",
     ).replace(/=/g, "");
     return base64urlString;
+}
+
+// not need rn -> maybe later
+function base64urlToBuffer(baseurl64String) {
+    // Base64url to Base64
+    const padding = "==".slice(0, (4 - (baseurl64String.length % 4)) % 4);
+    const base64String =
+    baseurl64String.replace(/-/g, "+").replace(/_/g, "/") + padding;
+
+    // Base64 to binary string
+    const str = atob(base64String);
+
+    // Binary string to buffer
+    const buffer = new ArrayBuffer(str.length);
+    const byteView = new Uint8Array(buffer);
+    for (let i = 0; i < str.length; i++) {
+      byteView[i] = str.charCodeAt(i);
+    }
+    return buffer;
 }
 
 
