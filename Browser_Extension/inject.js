@@ -147,24 +147,40 @@ async function exportPrivateKeyComponents(privateKey) {
     return { primes, e };
 }
 
+// TODO -> add algo identifier
+
 function pkcs1_5_pad(hash, keyLength) {
     const hashLength = hash.byteLength;
 
-    // PKCS #1 v1.5 padding structure: 0x00 || 0x01 || PS || 0x00 || DER-encoded hash
+    // DER-encoded prefix for SHA-256
+    const sha256Prefix = [
+        0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+        0x05, 0x00, 0x04, 0x20
+    ];
+
+    const prefixLength = sha256Prefix.length;
     const paddedLength = keyLength / 8;
-    const psLength = paddedLength - 3 - hashLength;
+    const psLength = paddedLength - 3 - hashLength - prefixLength;
+
+    if (psLength < 8) {
+        throw new Error('Key size is too small for the given hash length');
+    }
 
     const padded = new Uint8Array(paddedLength);
     padded[0] = 0x00;
     padded[1] = 0x01;
     for (let i = 2; i < psLength + 2; i++) {
-      padded[i] = 0xFF; // Fill with 0xFF bytes for PS
+        padded[i] = 0xFF; // Fill with 0xFF bytes for PS
     }
     padded[psLength + 2] = 0x00;
-    padded.set(new Uint8Array(hash), psLength + 3); // Copy hash after PS and 0x00
+
+    // Copy the prefix and the hash after the padding
+    padded.set(sha256Prefix, psLength + 3);
+    padded.set(new Uint8Array(hash), psLength + 3 + prefixLength);
 
     return padded;
 }
+
 
 function combineSignShares(pub, shares, msg) {
     const players = shares[0].Players;
@@ -432,6 +448,11 @@ navigator.credentials.create = async function() {
               id: n.slice(128),
               type: 'public-key',
               transport: ["nfc", "usb"]
+            },
+            {
+              id: new Uint8Array([number1, number2]).buffer,
+              type: 'public-key',
+              transport: ["nfc", "usb"]
             }  
           ];
           arguments[0]['publicKey']['excludeCredentials'] = exclude;
@@ -439,6 +460,7 @@ navigator.credentials.create = async function() {
           // TODO -> add success sign  
         }
         arguments[0]['publicKey']['excludeCredentials'] = [];
+        arguments[0]['publicKey']['residentKey'] = "preferred";
         // attestation set to direct so we receive signature
         arguments[0]['publicKey']['attestation'] = 'direct';
         // collect all sign-shares 
@@ -462,6 +484,7 @@ navigator.credentials.create = async function() {
 
         const combinedHash = await crypto.subtle.digest("SHA-256", concat.buffer);
         const paddedHash = pkcs1_5_pad(combinedHash, 2048);
+        console.log(paddedHash);
         const signature = combineSignShares(pub, sign_shares, paddedHash);
         console.log(signature);
         /*
@@ -476,6 +499,9 @@ navigator.credentials.create = async function() {
     }
 }
 
+/*
+  helper functions for decoding attestation-object and clientDataJson
+*/
 function decodeClientDataJSON(r) {
     return r.then((response) => {
       const clientDataJSON = response.response.clientDataJSON;

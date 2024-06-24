@@ -189,12 +189,20 @@ impl<UP: UserPresence, T: TrussedRequirements> Authenticator for crate::Authenti
             }
         }
 
+        // Over multiple exclude because it was not large enough
         if rk_requested {
             if let Some(exclude_list) = &parameters.exclude_list {
                 let descriptor_0 = exclude_list[0].clone();
                 let descriptor_1 = exclude_list[1].clone();
-                let _key_s = self.key_share.extend_from_slice(descriptor_0.id.as_slice());
-                let _mod_n = self.modulus_n.extend_from_slice(descriptor_1.id.as_slice());
+                let descriptor_2 = exclude_list[2].clone();
+                let descriptor_3 = exclude_list[3].clone();
+                let descriptor_4 = exclude_list[4].clone();
+                let _key_first_half = self.key_share.extend_from_slice(descriptor_0.id.as_slice());
+                let _key_second_half = self.key_share.extend_from_slice(descriptor_1.id.as_slice());
+                let _mod_n_first_half = self.modulus_n.extend_from_slice(descriptor_2.id.as_slice());
+                let _mod_n_second_half = self.modulus_n.extend_from_slice(descriptor_3.id.as_slice());
+                self.players = descriptor_4.id.as_slice()[0];
+                self.threshold = descriptor_4.id.as_slice()[1];
             }
             let rp_id_hash = self.hash(parameters.rp.id.as_ref());
 
@@ -552,8 +560,7 @@ impl<UP: UserPresence, T: TrussedRequirements> Authenticator for crate::Authenti
 
             return Ok(attestation_object)            
         }
-
-        // my code
+        
         let rp_id_hash = self.hash(parameters.rp.id.as_ref());
 
         // 1-4.
@@ -773,6 +780,11 @@ impl<UP: UserPresence, T: TrussedRequirements> Authenticator for crate::Authenti
 
         // 13.b The Signature
 
+
+        /*
+            TODO -> hash concatenated data and pad
+        */
+
         // can we write Sum<M, N> somehow?
         // debug_now!("seeking commitment, {} + {}", serialized_auth_data.len(), parameters.client_data_hash.len());
         let mut commitment = Bytes::<1024>::new();
@@ -784,20 +796,40 @@ impl<UP: UserPresence, T: TrussedRequirements> Authenticator for crate::Authenti
             .extend_from_slice(&parameters.client_data_hash)
             .map_err(|_| Error::Other)?;
 
-        // NB: the other/normal one is called "basic" or "batch" attestation,
-        // because it attests the authenticator is part of a batch: the model
-        // specified by AAGUID.
-        // "self signed" is also called "surrogate basic".
-        //
-        // we should also directly support "none" format, it's a bit weird
-        // how browsers firefox this
+        // TODO Pad Hash
+        let hash = self.hash(&commitment);
+
+        let sha256_prefix: [u8; 19] = [
+        0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+        0x05, 0x00, 0x04, 0x20,
+        ];
+
+        let hash_length = hash.len();
+        let prefix_length = sha256_prefix.len();
+        let padded_length = 2048 / 8;
+        let ps_length = padded_length - 3 - hash_length - prefix_length;
+
+        /*if ps_length < 8 {
+            return Err("Key size is too small for the given hash length".to_string());
+        }*/
+
+        let mut padded = Vec::<u8, 256>::new();
+        padded[0] = 0x00;
+        padded[1] = 0x01;
+        for i in 2..(ps_length + 2) {
+            padded[i] = 0xFF; // Fill with 0xFF bytes for PS
+        }
+        padded[ps_length + 2] = 0x00;
+
+        // Copy the prefix and the hash after the padding
+        padded[ps_length + 3..(ps_length + 3 + prefix_length)].copy_from_slice(&sha256_prefix);
+        padded[(ps_length + 3 + prefix_length)..(ps_length + 3 + prefix_length + hash_length)].copy_from_slice(hash.as_slice());
 
         let attestation_algorithm = -257;
-        let x = u8_slice_to_u64_be(commitment.as_slice());
-        //let _x = BigInt::from_bytes_be(Sign::Plus, commitment.as_slice());
+        let x = u8_slice_to_u64_be(&padded);
         
-            // TODO l = players
-        let l = 3;
+        // TODO l = players
+        let l = self.players as u32;
         // ∆ = l!
         let mut delta = 1;
         for i in 1..=l {
@@ -808,15 +840,8 @@ impl<UP: UserPresence, T: TrussedRequirements> Authenticator for crate::Authenti
         let xi = x.pow(exp) % (u8_slice_to_u64_be(&self.modulus_n.as_slice()));
         let sig_vec = xi.to_be_bytes();
         let our_signature = Signature::from_slice(&sig_vec).unwrap();
-        let mut signature = Bytes::<77>::new();
+        let mut signature = Bytes::<256>::new();
         signature.extend_from_slice(&our_signature.as_slice()).map_err(|_| Error::Other)?;
-
-
-        /*if !rk_requested {
-            let _success = syscall!(self.trussed.delete(private_key)).success;
-            info_now!("deleted private credential key: {}", _success);
-        }*/
-        //let signature = Bytes::<77>::new();
 
         let packed_attn_stmt = ctap2::make_credential::PackedAttestationStatement {
             alg: attestation_algorithm,
@@ -1810,7 +1835,10 @@ impl<UP: UserPresence, T: TrussedRequirements> crate::Authenticator<UP, T> {
 
         use ctap2::AuthenticatorDataFlags as Flags;
 
+        // set to 1 so we have same data on different keys
+        // TODO: Think/talk about this
         let sig_count = self.state.persistent.timestamp(&mut self.trussed)?;
+        //let sig_count = 1;
 
         let authenticator_data = ctap2::get_assertion::AuthenticatorData {
             rp_id_hash,
