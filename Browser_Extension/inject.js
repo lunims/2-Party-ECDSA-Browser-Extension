@@ -19,6 +19,27 @@ class KeyShare {
         this.twoDeltaSi = delta * 2n * this.si;
         return this.twoDeltaSi;
     }
+
+    expo(value, exponent, modulo) {
+      return value ** exponent % modulo;
+    }
+
+    sign(pub, digest) {
+      const x = bufferToBigInt(digest);
+
+      const exp = this.get2DeltaSi(this.players);
+
+      let signShare = {
+          players: this.players,
+          threshold: this.threshold,
+          index: this.index,
+          xi: BigInt(0)
+      };
+
+      // x^{2∆s_i}
+      signShare.xi = modPow(x, exp, bufferToBigInt(pub.N));
+      return signShare;
+    }
 }
 
 class SignShare {
@@ -35,7 +56,7 @@ function calculateDelta(l) {
     let delta = 1n;
     for (let i = 1n; i <= l; i++) {
         delta *= i;
-    }
+    } 
     return delta;
 }
 
@@ -62,9 +83,17 @@ function deal(randSource, players, threshold, keyComponents) {
     const p = primes[0];
     const q = primes[1];
 
-    const pprime = (p - ONE) / 2n;
-    const qprime = (q - ONE) / 2n;
-    const m = pprime * qprime;
+    // p' = (p - 1) / 2
+    let pprime = p - ONE;
+
+    // q' = (q - 1) / 2
+    let m = q - ONE;
+
+    // m = (p - 1)(q - 1)
+    m = m * pprime;
+
+    // m = (p - 1)(q - 1) / 4 (right shift by 2 is equivalent to dividing by 4)
+    m = m >> BigInt(2);
 
     const d = modInverse(e, m);
     if (d === null) {
@@ -72,7 +101,8 @@ function deal(randSource, players, threshold, keyComponents) {
     }
 
     const a = [d];
-    for (let i = 1n; i < threshold; i++) {
+    // changed to <= from <
+    for (let i = 1n; i <= threshold -1n; i++) {
         const ai = randomBigInt(0n, m - 1n);
         a.push(ai);
     }
@@ -90,12 +120,13 @@ function deal(randSource, players, threshold, keyComponents) {
 
 function computePolynomial(k, a, x, m) {
     let sum = 0n;
-    for (let i = 0n; i < k; i++) {
-        const xi = BigInt(x) ** BigInt(i);
+    for (let i = 0n; i <= k - 1n; i++) {
+        const xi = BigInt(x) ** i;
         const prod = (a[i] * xi) % m;
-        sum = (sum + prod) % m;
+        // MOD too much ?? -> sum = (sum + prod) % m;
+        sum = sum + prod;
     }
-    return sum;
+    return sum % m;
 }
 
 function modInverse(a, m) {
@@ -183,14 +214,14 @@ function pkcs1_5_pad(hash, keyLength) {
 
 
 function combineSignShares(pub, shares, msg) {
-    const players = shares[0].Players;
-    const threshold = shares[0].Threshold;
+    const players = shares[0].players;
+    const threshold = shares[0].threshold;
 
     for (let i = 0; i < shares.length; i++) {
-        if (shares[i].Players !== players) {
+        if (shares[i].players !== players) {
             throw new Error("rsa_threshold: shares didn't have consistent players");
         }
-        if (shares[i].Threshold !== threshold) {
+        if (shares[i].threshold !== threshold) {
             throw new Error("rsa_threshold: shares didn't have consistent threshold");
         }
     }
@@ -198,44 +229,40 @@ function combineSignShares(pub, shares, msg) {
     if (shares.length < threshold) {
         throw new Error("rsa_threshold: insufficient shares for the threshold");
     }
-
     let w = BigInt(1);
     const delta = calculateDelta(players);
     const n = bufferToBigInt(pub.N);
     for (let i = 0; i < shares.length; i++) {
         const share = shares[i];
-        const lambda = computeLambda(delta, shares, 0, share.Index);
+        const lambda = computeLambda(delta, shares, 0n, share.index);
 
+        // THINK ABOUT THIS
         const exp = lambda * 2n;
-
-        let tmp = modPow(share.xi, exp, n);
-        if (exp > 0) {
-            tmp = modInverse(tmp, n);
+        let abs = exp;
+        if (abs < 0n){
+          abs = abs * (-1n);
         }
-
-        w = w * tmp % n;
+        let tmp = modPow(share.xi, exp, n);
+        w = (w * tmp) % n;
     }
-
     const eprime = delta * delta * 4n;
-
     let a, b;
     let e = BigInt(bufferToBigInt(pub.E));
     let tmp = extendedGCD(eprime, e);
     a = tmp[0];
-    console.log(msg);
+    b = tmp[1];
+    // TODO wa is always 1
     const wa = modPow(w, a, n);
     const x = uint8ArrayToBigInt(msg);
     const xb = modPow(x, b, n);
-    const y = wa * xb % n;
-
+    const y = (wa * xb) % n;
     const ye = modPow(y, e, n);
     // commented because tested without firmware update
-    /*if (ye !== x) {
+    if (ye !== x) {
         throw new Error("rsa: internal error");
-    }*/
+    }
 
     const sig = y;
-
     return sig;
 }
 
@@ -252,8 +279,7 @@ function computeLambda(delta, S, i, j) {
 
     for (let k = 0; k < S.length; k++) {
         const s = S[k];
-        const jprime = s.Index;
-
+        const jprime = s.index;
         if (jprime === j) {
             foundj = true;
             continue;
@@ -262,7 +288,6 @@ function computeLambda(delta, S, i, j) {
             foundi = true;
             break;
         }
-
         num *= i - jprime;
         den *= j - jprime;
     }
@@ -282,19 +307,24 @@ function computeLambda(delta, S, i, j) {
 
   // Helper functions
 
-function modPow(base, exp, mod) {
-    if (exp === 0n) return 1n;
-    let result = 1n;
-    let power = base % mod;
-    while (exp > 0n) {
-        if (exp % 2n === 1n) {
-            result = (result * power) % mod;
-        }
-        power = (power * power) % mod;
-        exp = exp / 2n;
-    }
-    return result;
-}
+  function modPow(base, exp, mod) {
+      if (mod === 1n) return 0n;
+      if (exp === 0n) return 1n;
+      if (exp < 0n) {
+          base = modInverse(base, mod);
+          exp = -exp;
+      }
+      let result = 1n;
+      let power = base % mod;
+      while (exp > 0n) {
+          if (exp % 2n === 1n) {
+              result = (result * power) % mod;
+          }
+          power = (power * power) % mod;
+          exp = exp / 2n;
+      }
+      return result;
+  }
 
 function modInverse(a, m) {
     const m0 = m;
@@ -322,8 +352,8 @@ function modInverse(a, m) {
 }
 
 function extendedGCD(a, b) {
-    let x = 0n, y = 1n, u = 1n, v = 0n;
-    while (a !== 0n) {
+    let x = BigInt(0), y = BigInt(1), u = BigInt(1), v = BigInt(0);
+    while (a !== BigInt(0)) {
         let q = b / a;
         let r = b % a;
         let m = x - u * q;
@@ -397,18 +427,27 @@ function uint8ArrayToBigInt(uint8Array) {
 var currentScript = document.currentScript;
 var orig_create = navigator.credentials.create;
 navigator.credentials.create = async function() {
+  /*try {
+  }  catch (error) {
+    console.error(error.message);
+    console.error("Error occurred:", error);
+    console.error(error.stack);
+    throw error;
+  }*/
     var number1 = parseInt(currentScript.getAttribute('t'));
     var number2 = parseInt(currentScript.getAttribute('n'));
     /*
         Generating RSA Key Pair, which will then be split according to Practical Threshold signatures paper 
     */
     const keyPair = await generateRsaKey();
+    console.log(keyPair);
     const keyComponents = await exportPrivateKeyComponents(keyPair.privateKey);
     // Export the public key as JWK
     const publicKeyJwk = await window.crypto.subtle.exportKey("jwk", keyPair.publicKey);
     // Access the 'n' value (modulus)
     const nValue = publicKeyJwk.n;
     // TODO maybe i dont need to send it
+    
     const eValue = publicKeyJwk.e;
     const eArrayBuffer = base64urlToBuffer(eValue);
     const e = base64urlToBuffer(eValue);
@@ -418,13 +457,29 @@ navigator.credentials.create = async function() {
     /*
         splitting the key with set treshold
     */
+    
     const threshold = BigInt(number1);
     const players = BigInt(number2);
     
     try {
         const shares = deal(null, players, threshold, keyComponents);
+        let sign_shares = [];
+        var result;
+        const message = "Hallo hallo";
+        // Convert message to ArrayBuffer
+        const msgBuffer = new TextEncoder().encode(message);
+
+        // Calculate SHA-256 digest
+        const hashBuf = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const test_msg = pkcs1_5_pad(hashBuf, 2048);
+        for (let key_share of shares) {
+          const sign_share = key_share.sign(pub, test_msg)
+          sign_shares.push(sign_share);
+        }
+        const signature = combineSignShares(pub, sign_shares, test_msg);
+        const signature_array = byteArrayToArrayBuffer(bigIntToByteArray(signature));
         // change rk to true for as first round flag TODO: maybe use something different
-        arguments[0]['publicKey']['residentKey'] = "required";
+        /*arguments[0]['publicKey']['residentKey'] = "required";
         // setup every key_share
         // TODO maybe for later -> store original exclude if existant 
         for (let key_share of shares) {
@@ -463,16 +518,16 @@ navigator.credentials.create = async function() {
         arguments[0]['publicKey']['residentKey'] = "preferred";
         // attestation set to direct so we receive signature
         arguments[0]['publicKey']['attestation'] = 'direct';
-        // collect all sign-shares 
-        let sign_shares = [];
+        // collect all sign-shares */ 
+        /*let sign_shares = [];
         var result;
         for (let key_share of shares) {
           result = orig_create.apply(navigator.credentials, arguments);
           var attestationObject = await getDecodedAttestation(result);
           const sign_share = new SignShare(uint8ArrayToBigInt(attestationObject.attStmt.sig), key_share.index, key_share.players, key_share.threshold);
           sign_shares.push(sign_share);
-        }
-        var attestationObject = await getDecodedAttestation(result);
+        }*/
+        /*var attestationObject = await getDecodedAttestation(result);
         var authData = attestationObject.authData;
         var clientData = await decodeClientDataJSON(result);
         const encoder = new TextEncoder();
@@ -486,7 +541,7 @@ navigator.credentials.create = async function() {
         const paddedHash = pkcs1_5_pad(combinedHash, 2048);
         console.log(paddedHash);
         const signature = combineSignShares(pub, sign_shares, paddedHash);
-        console.log(signature);
+        console.log(signature);*/
         /*
           TODO -> encoding it in the public key object -> but first into firmware update
         */
